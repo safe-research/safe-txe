@@ -3,6 +3,9 @@ name = "safe-txe-circuit"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
+aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
 sha3 = "0.10"
-aes-gcm = { version = "0.10", features = ["aes"] }

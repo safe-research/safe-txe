@@ -82,5 +82,5 @@ function rlpDecode(encoded: Uint8Array): SafeTransactionParameters {
 	};
 }
 
-export type { Operation, SafeTransaction };
+export type { Operation, SafeTransaction, SafeTransactionParameters };
 export { rlpEncode, rlpDecode };

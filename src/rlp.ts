@@ -1,4 +1,4 @@
-import { type Bytes, byteLength, isBytes } from "./bytes.ts";
+import { type Bytes, byteLength, type Hex, isBytes, setHex } from "./bytes.ts";
 
 type Encode = number | bigint | Bytes | Encode[];
 type Decode = Bytes | Decode[];
@@ -10,10 +10,10 @@ function encode(data: Encode): Uint8Array {
 		if (byteLength(data) === 1 && Number(data) < 0x80) {
 			return Uint8Array.from([Number(data)]);
 		} else {
-			return lengthPrefix(0x80, fromBytes(data));
+			return lengthPrefix(0x80, toArray(data));
 		}
 	} else if (typeof data === "bigint" || typeof data === "number") {
-		return encode(`0x${hex(data)}`);
+		return encode(`0x${toHex(data)}`);
 	} else {
 		throw new Error(`invalid RLP field ${data}`);
 	}
@@ -28,7 +28,7 @@ function lengthPrefix(offset: number, ...chunks: Uint8Array[]): Uint8Array {
 		result = new Uint8Array(start + length);
 		result[0] = offset + length;
 	} else {
-		const lbytes = hex(length);
+		const lbytes = toHex(length);
 		const lsize = lbytes.length / 2;
 		start = 1 + lsize;
 		result = new Uint8Array(start + length);
@@ -96,7 +96,18 @@ function prefixedLength(
 	}
 }
 
-function hex(value: number | bigint): string {
+function toArray(bytes: Bytes | Hex): Uint8Array {
+	const hex = bytes.replace(/^0x/, "");
+	const array = new Uint8Array(hex.length / 2);
+	setHex(array, hex);
+	return array;
+}
+
+function toBytes(array: Uint8Array): Bytes {
+	return `0x${[...array].map(toHexByte).join("")}`;
+}
+
+function toHex(value: number | bigint): Hex {
 	if (value === 0 || value === 0n) {
 		return "";
 	}
@@ -104,29 +115,8 @@ function hex(value: number | bigint): string {
 	return hex.length % 2 === 0 ? hex : `0${hex}`;
 }
 
-function setHex(array: Uint8Array, hex: string) {
-	for (let i = 0; i < hex.length / 2; i++) {
-		const j = i * 2;
-		array[i] = parseInt(hex.slice(j, j + 2), 16);
-	}
-}
-
-function fromHex(data: string): Uint8Array {
-	const result = new Uint8Array(data.length / 2);
-	setHex(result, data);
-	return result;
-}
-
-function fromBytes(data: Bytes): Uint8Array {
-	return fromHex(data.slice(2));
-}
-
-function toHexByte(byte: number): string {
+function toHexByte(byte: number): Hex {
 	return byte.toString(16).padStart(2, "0");
-}
-
-function toBytes(data: Uint8Array): Bytes {
-	return `0x${[...data].map(toHexByte).join("")}` as Bytes;
 }
 
 export { encode, decode };

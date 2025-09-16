@@ -1,0 +1,93 @@
+//! Safe smart account data structures and methods.
+
+use crate::rlp;
+use sha3::{Digest as _, Keccak256};
+
+#[derive(Default)]
+pub struct SafeTransaction<'a> {
+    to: [u8; 20],
+    value: [u8; 32],
+    data: &'a [u8],
+    operation: Operation,
+    safe_tx_gas: [u8; 32],
+    gas_gas: [u8; 32],
+    gas_price: [u8; 32],
+    gas_token: [u8; 20],
+    refund_reciver: [u8; 20],
+}
+
+impl<'a> SafeTransaction<'a> {
+    /// RLP-decodes a Safe transaction with the given `nonce`.
+    pub fn decode(encoded: &'a [u8]) -> Result<Self, rlp::Error> {
+        let mut result = SafeTransaction::default();
+
+        let mut decoder = rlp::Decoder::new(encoded);
+        {
+            let mut list = decoder.list()?;
+            result.to = list.address()?;
+            result.value = list.uint()?;
+            result.data = list.bytes()?;
+            result.operation = list.bool()?.into();
+            result.safe_tx_gas = list.uint()?;
+            result.gas_gas = list.uint()?;
+            result.gas_price = list.uint()?;
+            result.gas_token = list.address()?;
+            result.refund_reciver = list.address()?;
+            list.done()?;
+        }
+        decoder.done()?;
+
+        Ok(result)
+    }
+
+    /// Returns the Safe transaction ERC-712 struct hash.
+    pub fn struct_hash(&self, nonce: [u8; 32]) -> [u8; 32] {
+        let mut hasher = Keccak256::new();
+        hasher.update(
+            b"\xbb\x83\x10\xd4\x86\x36\x8d\xb6\xbd\x6f\x84\x94\x02\xfd\xd7\x3a\
+              \xd5\x3d\x31\x6b\x5a\x4b\x26\x44\xad\x6e\xfe\x0f\x94\x12\x86\xd8",
+        );
+        hasher.update(self.to);
+        hasher.update(self.value);
+        hasher.update(Keccak256::digest(self.data));
+        hasher.update(self.operation.as_word());
+        hasher.update(self.safe_tx_gas);
+        hasher.update(self.gas_gas);
+        hasher.update(self.gas_price);
+        hasher.update(self.gas_token);
+        hasher.update(self.refund_reciver);
+        hasher.update(nonce);
+        hasher.finalize().into()
+    }
+}
+
+#[derive(Default)]
+pub enum Operation {
+    #[default]
+    Call,
+    Delegatecall,
+}
+
+impl Operation {
+    /// The operation as an EVM word.
+    fn as_word(&self) -> [u8; 32] {
+        match self {
+            Operation::Call => [0u8; 32],
+            Operation::Delegatecall => {
+                let mut op = [0u8; 32];
+                op[31] = 1;
+                op
+            }
+        }
+    }
+}
+
+impl From<bool> for Operation {
+    fn from(value: bool) -> Self {
+        if value {
+            Operation::Delegatecall
+        } else {
+            Operation::Call
+        }
+    }
+}
