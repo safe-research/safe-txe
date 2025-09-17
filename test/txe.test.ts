@@ -17,20 +17,16 @@ describe("txe", () => {
 				refundReceiver: `0x${"a3".repeat(20)}`,
 			} as const;
 
-			const proposer = (await crypto.subtle.generateKey("X25519", false, [
-				"deriveBits",
-			])) as CryptoKeyPair;
 			const recipients = (await Promise.all(
 				[...Array(5)].map(() =>
 					crypto.subtle.generateKey("X25519", false, ["deriveBits"]),
 				),
 			)) as CryptoKeyPair[];
 
-      const blob = await encrypt({
-        transaction,
-        proposer,
-        recipients: recipients.map((r) => r.publicKey),
-      });
+			const { blob } = await encrypt({
+				transaction,
+				recipients: recipients.map((r) => r.publicKey),
+			});
 
 			for (const { privateKey } of recipients) {
 				const decrypted = await decrypt({ blob, privateKey });

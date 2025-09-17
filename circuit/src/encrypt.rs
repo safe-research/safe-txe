@@ -26,9 +26,8 @@ pub fn content(
 /// Content key encryption algorithm.
 pub fn key(
     content_key: [u8; 16],
-    public_key: [u8; 32],
-    private_key: [u8; 32],
+    shared_secret: [u8; 32],
 ) -> Result<[u8; 24], aes_gcm::Error> {
-    let _ = (content_key, public_key, private_key);
+    let _ = (content_key, shared_secret);
     Ok([0; 24])
 }

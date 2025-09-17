@@ -1,71 +1,46 @@
 //! External C interface for the circuit.
 
-use crate::{Input, PrivateInput, PublicInput};
+use crate::{Input, PrivateInput, PublicInput, PublicRecipient, PrivateRecipient};
 use std::slice;
 
-/// Input to circuit.
+#[repr(C)]
 pub struct CInput {
-    /// The public input.
     pub public: CPublicInput,
-    /// The private input.
     pub private: CPrivateInput,
 }
 
-impl CInput {
-    /// Creates a new input.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the C arrays are valid.
-    pub unsafe fn to_input<'a>(&'a self) -> Input<'a> {
-        Input {
-            public: PublicInput {
-                struct_hash: self.public.struct_hash,
-                nonce: self.public.nonce,
-                ciphertext: unsafe { self.public.ciphertext.as_slice() },
-                iv: self.public.iv,
-                tag: self.public.tag,
-                recipients: unsafe { self.public.recipients.as_slice() },
-            },
-            private: PrivateInput {
-                transaction: unsafe { self.private.transaction.as_slice() },
-                content_key: self.private.content_key,
-                private_key: self.private.private_key,
-            },
-        }
-    }
-}
-
-/// The public input circuit.
 #[derive(Default)]
 #[repr(C)]
 pub struct CPublicInput {
-    /// The Safe transaction struct hash.
     pub struct_hash: [u8; 32],
-    /// The Safe transaction nonce.
     pub nonce: [u8; 32],
-    /// The encrypted Safe transaction. The Safe transaction with `nonce` must
-    /// hash to `struct_hash`.
     pub ciphertext: CArray<u8>,
-    /// The initialization vector used for encryption.
     pub iv: [u8; 12],
-    /// The authentication tag.
     pub tag: [u8; 16],
-    /// The recipients of the encrypted Safe transaction.
-    pub recipients: CArray<crate::Recipient>,
+    pub recipients: CArray<CPublicRecipient>,
 }
 
-/// The private input to the circuit. This is omitted when verifying.
+#[derive(Default)]
+#[repr(C)]
+pub struct CPublicRecipient {
+    pub encrypted_key: [u8; 24],
+    pub ephemeral_public_key: [u8; 32],
+}
+
 #[derive(Default)]
 #[repr(C)]
 pub struct CPrivateInput {
-    /// The RLP encoded Safe transaction.
     pub transaction: CArray<u8>,
-    /// The symmetric content encryption key used to encrypt the RPL encoded
-    /// Safe transaction using AES-GCM.
     pub content_key: [u8; 16],
-    /// The proposer's private X25519 encryption key.
-    pub private_key: [u8; 32],
+    pub ephemeral_private_key: [u8; 32],
+    pub recipients: CArray<CPrivateRecipient>,
+}
+
+#[derive(Default)]
+#[repr(C)]
+pub struct CPrivateRecipient {
+    pub public_key: [u8; 32],
+    pub ephemeral_private_key: [u8; 32],
 }
 
 /// A C slice.
@@ -122,6 +97,7 @@ pub extern "C" fn txe_input_new(transaction_len: usize, recipients_len: usize) -
         },
         private: CPrivateInput {
             transaction: CArray::new(transaction_len),
+            recipients: CArray::new(recipients_len),
             ..Default::default()
         },
     }))
@@ -148,7 +124,37 @@ pub unsafe extern "C" fn txe_circuit(input: *const CInput) {
     #[cfg(target_arch = "wasm32")]
     wasm::set_panic_hook();
 
-    let input = unsafe { (*input).to_input() };
+    let input = unsafe { &*input };
+    let public_recipients = {
+        let recipients = unsafe { input.public.recipients.as_slice() };
+        recipients.iter().map(|r| PublicRecipient {
+            encrypted_key: r.encrypted_key,
+            ephemeral_public_key: r.ephemeral_public_key,
+        }).collect::<Vec<_>>()
+    };
+    let private_recipients = {
+        let recipients = unsafe { input.private.recipients.as_slice() };
+        recipients.iter().map(|r| PrivateRecipient {
+            public_key: r.public_key,
+            ephemeral_private_key: r.ephemeral_private_key,
+        }).collect::<Vec<_>>()
+    };
+    let input = Input {
+        public: PublicInput {
+            struct_hash: input.public.struct_hash,
+            nonce: input.public.nonce,
+            ciphertext: unsafe { input.public.ciphertext.as_slice() },
+            iv: input.public.iv,
+            tag: input.public.tag,
+            recipients: &public_recipients,
+        },
+        private: PrivateInput {
+            transaction: unsafe { input.private.transaction.as_slice() },
+            content_key: input.private.content_key,
+            recipients: &private_recipients,
+        },
+    };
+
     crate::circuit(&input);
 }
 

@@ -15,14 +15,14 @@ const circuit = await fs
 		const bytes = wasm as BufferSource;
 		const decoder = new TextDecoder();
 		const { instance } = await WebAssembly.instantiate(bytes, {
-		  env: {
+			env: {
 				log: (ptr: number, len: number) => {
-          const { memory } = instance.exports as { memory: WebAssembly.Memory };
-          const buffer = new Uint8Array(memory.buffer.slice(ptr, ptr + len));
-          const message = decoder.decode(buffer);
-          console.log(message);
-				}
-			}
+					const { memory } = instance.exports as { memory: WebAssembly.Memory };
+					const buffer = new Uint8Array(memory.buffer.slice(ptr, ptr + len));
+					const message = decoder.decode(buffer);
+					console.log(message);
+				},
+			},
 		});
 		const { memory, txe_input_new, txe_input_free, txe_circuit } =
 			instance.exports as {
@@ -96,19 +96,19 @@ async function txe() {
 		},
 		transaction,
 	);
-	const blob = await encrypt({
+	const { blob, ...input } = await encrypt({
 		transaction,
-		proposer,
 		recipients: recipients.map((r) => r.publicKey),
 	});
 
-	return extract({
-		structHash: structHash as Bytes,
-		nonce: transaction.nonce,
-		blob,
-		privateKey: proposer.privateKey,
-		recipients: recipients.map((r) => r.publicKey),
-	});
+	return {
+		...extract({
+			structHash: structHash as Bytes,
+			nonce: transaction.nonce,
+			blob,
+		}),
+		...input,
+	};
 }
 
 describe("circuit", { skip: !circuit }, () => {

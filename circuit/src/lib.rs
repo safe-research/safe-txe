@@ -1,4 +1,5 @@
 pub mod capi;
+mod ecdh;
 mod encrypt;
 mod macros;
 mod rlp;
@@ -30,8 +31,16 @@ pub struct PublicInput<'a> {
     pub iv: [u8; 12],
     /// The authentication tag.
     pub tag: [u8; 16],
-    /// The recipients of the encrypted Safe transaction.
-    pub recipients: &'a [Recipient],
+    /// The recipient encrypted keys and ephemeral public keys.
+    pub recipients: &'a [PublicRecipient],
+}
+
+/// Public input per recipient.
+pub struct PublicRecipient {
+    /// The encrypted content key for the recipient.
+    pub encrypted_key: [u8; 24],
+    /// The ephemeral public key used for ECDH.
+    pub ephemeral_public_key: [u8; 32],
 }
 
 /// The private input to the circuit. Should be omitted when verifying.
@@ -41,18 +50,16 @@ pub struct PrivateInput<'a> {
     /// The symmetric content encryption key used to encrypt the RPL encoded
     /// Safe transaction using AES-GCM.
     pub content_key: [u8; 16],
-    /// The proposer's private X25519 encryption key.
-    pub private_key: [u8; 32],
+    /// The recipient public keys and ephemeral private keys.
+    pub recipients: &'a [PrivateRecipient],
 }
 
-/// A recipient.
-#[derive(Default)]
-#[repr(C)]
-pub struct Recipient {
-    /// The recipient's public X25519 encryption key.
+/// Private input per recipient.
+pub struct PrivateRecipient {
+    /// The recipient's public key used for encryption.
     pub public_key: [u8; 32],
-    /// The encrypted content key for the recipient.
-    pub encrypted_key: [u8; 24],
+    /// The ephemeral private key used for ECDH.
+    pub ephemeral_private_key: [u8; 32],
 }
 
 /// The private input to the verifier program.
@@ -74,14 +81,23 @@ pub fn circuit(input: &Input) {
     verify!(tag == input.public.tag, "tag mismatch");
 
     // Verify the key wrapping integrity.
-    for recipient in input.public.recipients {
+    verify!(input.public.recipients.len() == input.private.recipients.len(), "recipient mismatch");
+    for (public, private) in input.public.recipients.iter().zip(input.private.recipients.iter()) {
+        // Verify the ephemeral key integrity.
+        let ephemeral_public_key = ecdh::public_key(private.ephemeral_private_key);
+        verify!(ephemeral_public_key == public.ephemeral_public_key, "ephemeral key mismatch");
+
+        // Verify the content key encryption.
+        let shared_secret = ecdh::shared_secret(
+            private.ephemeral_private_key,
+            private.public_key,
+        );
         let encrypted_key = unwrap!(encrypt::key(
             input.private.content_key,
-            input.private.private_key,
-            recipient.public_key,
+            shared_secret,
         ));
         verify!(
-            encrypted_key == recipient.encrypted_key,
+            encrypted_key == public.encrypted_key,
             "encrypted key mismatch"
         );
     }
