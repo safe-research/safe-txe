@@ -8,5 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
+aes-kw = "0.2"
 curve25519-dalek = "4"
+sha2 = "0.10"
 sha3 = "0.10"

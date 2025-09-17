@@ -9,6 +9,7 @@ use crate::{
     macros::{unwrap, verify},
     safe::SafeTransaction,
 };
+use std::iter;
 
 /// The input to the circuit.
 pub struct Input<'a> {
@@ -85,12 +86,7 @@ pub fn circuit(input: &Input) {
         input.public.recipients.len() == input.private.recipients.len(),
         "recipient mismatch"
     );
-    for (public, private) in input
-        .public
-        .recipients
-        .iter()
-        .zip(input.private.recipients.iter())
-    {
+    for (public, private) in iter::zip(input.public.recipients, input.private.recipients) {
         // Verify the ephemeral key integrity.
         let ephemeral_public_key = ecdh::public_key(private.ephemeral_private_key);
         verify!(

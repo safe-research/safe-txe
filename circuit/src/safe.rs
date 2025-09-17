@@ -47,15 +47,15 @@ impl<'a> SafeTransaction<'a> {
             b"\xbb\x83\x10\xd4\x86\x36\x8d\xb6\xbd\x6f\x84\x94\x02\xfd\xd7\x3a\
               \xd5\x3d\x31\x6b\x5a\x4b\x26\x44\xad\x6e\xfe\x0f\x94\x12\x86\xd8",
         );
-        hasher.update(self.to);
+        hasher.update(address_to_word(self.to));
         hasher.update(self.value);
         hasher.update(Keccak256::digest(self.data));
         hasher.update(self.operation.as_word());
         hasher.update(self.safe_tx_gas);
         hasher.update(self.gas_gas);
         hasher.update(self.gas_price);
-        hasher.update(self.gas_token);
-        hasher.update(self.refund_reciver);
+        hasher.update(address_to_word(self.gas_token));
+        hasher.update(address_to_word(self.refund_reciver));
         hasher.update(nonce);
         hasher.finalize().into()
     }
@@ -90,4 +90,14 @@ impl From<bool> for Operation {
             Operation::Call
         }
     }
+}
+
+fn address_to_word(address: [u8; 20]) -> [u8; 32] {
+    let mut word = [0u8; 32];
+    unsafe {
+        address
+            .as_ptr()
+            .copy_to_nonoverlapping(word.as_mut_ptr().add(12), 20)
+    };
+    word
 }

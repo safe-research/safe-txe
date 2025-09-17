@@ -46,7 +46,7 @@ impl<'a> Decoder<'a> {
         unsafe {
             bytes
                 .as_ptr()
-                .copy_to(uint.get_unchecked_mut(offset..).as_mut_ptr(), bytes.len())
+                .copy_to_nonoverlapping(uint.as_mut_ptr().add(offset), bytes.len())
         };
         Ok(uint)
     }
@@ -77,7 +77,7 @@ impl<'a> Decoder<'a> {
             let (data, rest) = prefixed_len(tag, 0x80, self.0)?;
             (Item::Bytes(data), rest)
         } else {
-            let (data, rest) = prefixed_len(tag, 0x80, self.0)?;
+            let (data, rest) = prefixed_len(tag, 0xc0, self.0)?;
             (Item::List(Decoder(data)), rest)
         };
         self.0 = rest;
@@ -106,7 +106,7 @@ fn prefixed_len(tag: u8, offset: u8, data: &[u8]) -> Result<(&[u8], &[u8]), Erro
                     unsafe {
                         lbytes
                             .as_ptr()
-                            .copy_to(be.get_unchecked_mut(offset..).as_mut_ptr(), llen)
+                            .copy_to_nonoverlapping(be.as_mut_ptr().add(offset), llen)
                     };
                     u32::from_be_bytes(be)
                 };
