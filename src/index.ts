@@ -6,3 +6,4 @@ export type {
 	SafeTransaction,
 	SafeTransactionParameters,
 } from "./safe.ts";
+export { isTXE, type TXE, toJWE } from "./txe.ts";

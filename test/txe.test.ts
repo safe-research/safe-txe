@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { decrypt, encrypt } from "../src/index.ts";
+import { ethers } from "ethers";
+import { generalDecrypt } from "jose";
+import { decrypt, encrypt, toJWE } from "../src/index.ts";
 
 describe("txe", () => {
 	describe("encryption", () => {
@@ -32,6 +34,48 @@ describe("txe", () => {
 				const decrypted = await decrypt({ blob, privateKey });
 				assert.deepEqual(decrypted, transaction);
 			}
+		});
+
+		it("can be converted to a JWE", async () => {
+			const zero = `0x${"00".repeat(20)}` as const;
+			const transaction = {
+				to: zero,
+				value: 0n,
+				data: "0x",
+				operation: 0,
+				safeTxGas: 0n,
+				baseGas: 0n,
+				gasPrice: 0n,
+				gasToken: zero,
+				refundReceiver: zero,
+			} as const;
+			const recipient = (await crypto.subtle.generateKey("X25519", false, [
+				"deriveBits",
+			])) as CryptoKeyPair;
+
+			const { blob } = await encrypt({
+				transaction,
+				recipients: [recipient.publicKey],
+			});
+
+			const jwe = toJWE(blob);
+			const { plaintext } = await generalDecrypt(jwe, recipient.privateKey);
+			assert.deepEqual(
+				plaintext,
+				ethers.getBytes(
+					ethers.encodeRlp([
+						transaction.to,
+						ethers.toBeArray(transaction.value),
+						transaction.data,
+						ethers.toBeArray(transaction.operation),
+						ethers.toBeArray(transaction.safeTxGas),
+						ethers.toBeArray(transaction.baseGas),
+						ethers.toBeArray(transaction.gasPrice),
+						transaction.gasToken,
+						transaction.refundReceiver,
+					]),
+				),
+			);
 		});
 	});
 });

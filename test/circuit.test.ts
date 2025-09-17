@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { ethers } from "ethers";
 import { type Bytes, encrypt, extract, type Input } from "../src/index.ts";
 
+const { TXE_LOG } = process.env;
 const circuit = await fs
 	.readFile("./target/wasm32-unknown-unknown/debug/safe_txe_circuit.wasm")
 	.catch(() => null)
@@ -17,6 +18,9 @@ const circuit = await fs
 		const { instance } = await WebAssembly.instantiate(bytes, {
 			env: {
 				log: (ptr: number, len: number) => {
+					if (!TXE_LOG) {
+						return;
+					}
 					const { memory } = instance.exports as { memory: WebAssembly.Memory };
 					const buffer = new Uint8Array(memory.buffer.slice(ptr, ptr + len));
 					const message = decoder.decode(buffer);
@@ -34,14 +38,51 @@ const circuit = await fs
 				txe_input_free: (input: number) => void;
 				txe_circuit: (input: number) => number;
 			};
+		const getMemoryCursor = (ptr: number, len?: number) => {
+			const buffer = new Uint8Array(memory.buffer, ptr, len);
+			const view = new DataView(memory.buffer, ptr, len);
+
+			let pos = 0;
+			return {
+				write: (data: Uint8Array) => {
+					buffer.set(data, pos);
+					pos += data.length;
+				},
+				skip: (size: number) => {
+					pos += size;
+				},
+				slice: (itemSize: number = 1) => {
+					const ptr = view.getUint32(pos, true);
+					const len = view.getUint32(pos + 4, true) * itemSize;
+					pos += 8;
+					return getMemoryCursor(ptr, len);
+				},
+			};
+		};
 		return (input: Input) => {
 			const ptr = txe_input_new(
 				input.public.ciphertext.length,
 				input.public.recipients.length,
 			);
 			try {
-				const buffer = new Uint8Array(memory.buffer.slice(ptr));
-				buffer[0] = 1;
+				const cursor = getMemoryCursor(ptr);
+				cursor.write(ethers.getBytes(input.public.structHash));
+				cursor.write(ethers.getBytes(ethers.toBeHex(input.public.nonce, 32)));
+				cursor.slice().write(input.public.ciphertext);
+				cursor.write(input.public.iv);
+				cursor.write(input.public.tag);
+				let recipients = cursor.slice(56);
+				for (const recipient of input.public.recipients) {
+					recipients.write(recipient.encryptedKey);
+					recipients.write(recipient.ephemeralPublicKey);
+				}
+				cursor.slice().write(input.private.transaction);
+				cursor.write(input.private.contentEncryptionKey);
+				recipients = cursor.slice(64);
+				for (const recipient of input.private.recipients) {
+					recipients.write(recipient.publicKey);
+					recipients.write(recipient.ephemeralPrivateKey);
+				}
 				txe_circuit(ptr);
 				return true;
 			} catch {
@@ -115,42 +156,35 @@ describe("circuit", { skip: !circuit }, () => {
 	describe("verify", () => {
 		it("should verify a valid TXE", async () => {
 			const input = await txe();
-			const htoa = (x: string) => Buffer.from(x.replace(/^0x/, ""), "hex");
-			const bstr = (x: Uint8Array) =>
-				`b"${[...x].map((b) => `\\x${b.toString(16).padStart(2, "0")}`)}"`;
-			console.log(`
-        Input {
-          public: PublicInput {
-            structHash: ${bstr(htoa(input.public.structHash))},
-            nonce: ${bstr(htoa(input.public.nonce.toString(16).padStart(64, "0")))},
-            ciphertext: ${bstr(input.public.ciphertext)},
-            iv: ${bstr(input.public.iv)},
-            tag: ${bstr(input.public.tag)},
-            recipients: &[${input.public.recipients.map(
-							(r) => `Recipient {
-              encryptedKey: ${bstr(r.encryptedKey)},
-              ephemeralPublicKey: ${bstr(r.ephemeralPublicKey)},
-            }`,
-						)}],
-          },
-          private: PrivateInput {
-            transaction: ${bstr(input.private.transaction)},
-            contentEncryptionKey: ${bstr(input.private.contentEncryptionKey)},
-            recipients: &[${input.private.recipients.map(
-							(r) => `Recipient {
-              publicKey: ${bstr(r.publicKey)},
-              ephemeralPrivateKey: ${bstr(r.ephemeralPrivateKey)},
-            }`,
-						)}],
-          },
-        }
-      `);
 			assert.equal(circuit?.(input), true);
 		});
 
 		it("should fail if TXE was tamperred with", async () => {
-			const input = await txe();
-			assert.equal(circuit?.(input), false);
+			for (const modify of [
+				// biome-ignore-start lint/style/noNonNullAssertion: test code
+				// biome-ignore-start lint/suspicious/noAssignInExpressions: test code
+				(input: Input) =>
+					(input.public.structHash = `0x${(BigInt(input.public.structHash) + 1n).toString(16).padStart(64, "0")}`),
+				(input: Input) => input.public.nonce++,
+				(input: Input) => (input.public.ciphertext[0]! ^= 0xff),
+				(input: Input) => (input.public.iv[0]! ^= 0xff),
+				(input: Input) => (input.public.tag[0]! ^= 0xff),
+				(input: Input) =>
+					(input.public.recipients[0]!.encryptedKey[0]! ^= 0xff),
+				(input: Input) =>
+					(input.public.recipients[0]!.ephemeralPublicKey[0]! ^= 0xff),
+				(input: Input) => (input.private.transaction[0]! ^= 0xff),
+				(input: Input) => (input.private.contentEncryptionKey[0]! ^= 0xff),
+				(input: Input) => (input.private.recipients[0]!.publicKey[0]! ^= 0xff),
+				(input: Input) =>
+					(input.private.recipients[0]!.ephemeralPrivateKey[0]! ^= 0xff),
+				// biome-ignore-end lint/style/noNonNullAssertion: test code
+				// biome-ignore-end lint/suspicious/noAssignInExpressions: test code
+			]) {
+				const input = await txe();
+				modify(input);
+				assert.equal(circuit?.(input), false);
+			}
 		});
 	});
 });
