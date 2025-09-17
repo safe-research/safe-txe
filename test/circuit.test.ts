@@ -115,6 +115,36 @@ describe("circuit", { skip: !circuit }, () => {
 	describe("verify", () => {
 		it("should verify a valid TXE", async () => {
 			const input = await txe();
+			const htoa = (x: string) => Buffer.from(x.replace(/^0x/, ""), "hex");
+			const bstr = (x: Uint8Array) =>
+				`b"${[...x].map((b) => `\\x${b.toString(16).padStart(2, "0")}`)}"`;
+			console.log(`
+        Input {
+          public: PublicInput {
+            structHash: ${bstr(htoa(input.public.structHash))},
+            nonce: ${bstr(htoa(input.public.nonce.toString(16).padStart(64, "0")))},
+            ciphertext: ${bstr(input.public.ciphertext)},
+            iv: ${bstr(input.public.iv)},
+            tag: ${bstr(input.public.tag)},
+            recipients: &[${input.public.recipients.map(
+							(r) => `Recipient {
+              encryptedKey: ${bstr(r.encryptedKey)},
+              ephemeralPublicKey: ${bstr(r.ephemeralPublicKey)},
+            }`,
+						)}],
+          },
+          private: PrivateInput {
+            transaction: ${bstr(input.private.transaction)},
+            contentEncryptionKey: ${bstr(input.private.contentEncryptionKey)},
+            recipients: &[${input.private.recipients.map(
+							(r) => `Recipient {
+              publicKey: ${bstr(r.publicKey)},
+              ephemeralPrivateKey: ${bstr(r.ephemeralPrivateKey)},
+            }`,
+						)}],
+          },
+        }
+      `);
 			assert.equal(circuit?.(input), true);
 		});
 

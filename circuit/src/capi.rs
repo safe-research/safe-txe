@@ -1,6 +1,6 @@
 //! External C interface for the circuit.
 
-use crate::{Input, PrivateInput, PublicInput, PublicRecipient, PrivateRecipient};
+use crate::{Input, PrivateInput, PrivateRecipient, PublicInput, PublicRecipient};
 use std::slice;
 
 #[repr(C)]
@@ -31,8 +31,7 @@ pub struct CPublicRecipient {
 #[repr(C)]
 pub struct CPrivateInput {
     pub transaction: CArray<u8>,
-    pub content_key: [u8; 16],
-    pub ephemeral_private_key: [u8; 32],
+    pub content_encryption_key: [u8; 16],
     pub recipients: CArray<CPrivateRecipient>,
 }
 
@@ -127,17 +126,23 @@ pub unsafe extern "C" fn txe_circuit(input: *const CInput) {
     let input = unsafe { &*input };
     let public_recipients = {
         let recipients = unsafe { input.public.recipients.as_slice() };
-        recipients.iter().map(|r| PublicRecipient {
-            encrypted_key: r.encrypted_key,
-            ephemeral_public_key: r.ephemeral_public_key,
-        }).collect::<Vec<_>>()
+        recipients
+            .iter()
+            .map(|r| PublicRecipient {
+                encrypted_key: r.encrypted_key,
+                ephemeral_public_key: r.ephemeral_public_key,
+            })
+            .collect::<Vec<_>>()
     };
     let private_recipients = {
         let recipients = unsafe { input.private.recipients.as_slice() };
-        recipients.iter().map(|r| PrivateRecipient {
-            public_key: r.public_key,
-            ephemeral_private_key: r.ephemeral_private_key,
-        }).collect::<Vec<_>>()
+        recipients
+            .iter()
+            .map(|r| PrivateRecipient {
+                public_key: r.public_key,
+                ephemeral_private_key: r.ephemeral_private_key,
+            })
+            .collect::<Vec<_>>()
     };
     let input = Input {
         public: PublicInput {
@@ -150,7 +155,7 @@ pub unsafe extern "C" fn txe_circuit(input: *const CInput) {
         },
         private: PrivateInput {
             transaction: unsafe { input.private.transaction.as_slice() },
-            content_key: input.private.content_key,
+            content_encryption_key: input.private.content_encryption_key,
             recipients: &private_recipients,
         },
     };
@@ -160,7 +165,10 @@ pub unsafe extern "C" fn txe_circuit(input: *const CInput) {
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
-    use std::{panic::{self, PanicHookInfo}, sync::Once};
+    use std::{
+        panic::{self, PanicHookInfo},
+        sync::Once,
+    };
 
     #[link(wasm_import_module = "env")]
     unsafe extern "C" {
@@ -176,8 +184,8 @@ mod wasm {
 
     pub fn set_panic_hook() {
         static SET_HOOK: Once = Once::new();
-         SET_HOOK.call_once(|| {
-             panic::set_hook(Box::new(panic_hook));
-         });
+        SET_HOOK.call_once(|| {
+            panic::set_hook(Box::new(panic_hook));
+        });
     }
 }
