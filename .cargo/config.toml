@@ -1,0 +1,4 @@
+[target.'wasm32-unknown-unknown']
+# The Ligero VM does not support all modern WebAssembly opcodes, so target the
+# MVP instruction set, which is completely supported by Ligero.
+rustflags = ["-C", "target-cpu=mvp"]

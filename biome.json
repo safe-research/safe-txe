@@ -4,6 +4,7 @@
 		"includes": [
 			"src/**/*.ts",
 			"test/**/*.ts",
+			"ligero/*.json",
 			"biome.json",
 			"package.json",
 			"package-lock.json"
