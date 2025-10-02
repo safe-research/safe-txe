@@ -1,4 +1,5 @@
-import { type Bytes, byteLength } from "./bytes.ts";
+import { type Bytes, byteLength, toBytes } from "./bytes.ts";
+import * as rlp from "./rlp.ts";
 import { decode } from "./txe.ts";
 
 type Input = {
@@ -25,6 +26,11 @@ type PrivateInput = {
 		publicKey: Uint8Array;
 		ephemeralPrivateKey: Uint8Array;
 	}[];
+};
+
+type InputArguments = {
+	public: Bytes;
+	private: Bytes;
 };
 
 type Extract = {
@@ -66,5 +72,33 @@ function extract({ nonce, structHash, blob }: Extract): Input {
 	return input;
 }
 
-export type { Input, PublicInput, PrivateInput };
-export { extract };
+function argify(input: Input): InputArguments {
+	return {
+		public: toBytes(
+			rlp.encode([
+				input.public.structHash,
+				input.public.nonce,
+				input.public.ciphertext,
+				input.public.iv,
+				input.public.tag,
+				input.public.recipients.map((r) => [
+					r.encryptedKey,
+					r.ephemeralPublicKey,
+				]),
+			]),
+		),
+		private: toBytes(
+			rlp.encode([
+				input.private.transaction,
+				input.private.contentEncryptionKey,
+				input.private.recipients.map((r) => [
+					r.publicKey,
+					r.ephemeralPrivateKey,
+				]),
+			]),
+		),
+	};
+}
+
+export type { Input, PublicInput, PrivateInput, InputArguments };
+export { extract, argify };

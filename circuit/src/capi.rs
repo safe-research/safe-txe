@@ -3,10 +3,49 @@
 use crate::{Input, PrivateInput, PrivateRecipient, PublicInput, PublicRecipient};
 use std::slice;
 
+/// FFI-safe circuit input data.
 #[repr(C)]
 pub struct CInput {
     pub public: CPublicInput,
     pub private: CPrivateInput,
+}
+
+impl CInput {
+    fn to_input(&self) -> Input<'_> {
+        Input {
+            public: PublicInput {
+                struct_hash: self.public.struct_hash,
+                nonce: self.public.nonce,
+                ciphertext: unsafe { self.public.ciphertext.as_slice().into() },
+                iv: self.public.iv,
+                tag: self.public.tag,
+                recipients: {
+                    let recipients = unsafe { self.public.recipients.as_slice() };
+                    recipients
+                        .iter()
+                        .map(|r| PublicRecipient {
+                            encrypted_key: r.encrypted_key,
+                            ephemeral_public_key: r.ephemeral_public_key,
+                        })
+                        .collect()
+                },
+            },
+            private: PrivateInput {
+                transaction: unsafe { self.private.transaction.as_slice().into() },
+                content_encryption_key: self.private.content_encryption_key,
+                recipients: {
+                    let recipients = unsafe { self.private.recipients.as_slice() };
+                    recipients
+                        .iter()
+                        .map(|r| PrivateRecipient {
+                            public_key: r.public_key,
+                            ephemeral_private_key: r.ephemeral_private_key,
+                        })
+                        .collect()
+                },
+            },
+        }
+    }
 }
 
 #[derive(Default)]
@@ -120,50 +159,14 @@ pub unsafe extern "C" fn txe_input_free(input: *mut CInput) {
 /// The caller must ensure that `input` is a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn txe_circuit(input: *const CInput) {
-    #[cfg(all(debug_assertions, target_arch = "wasm32"))]
+    #[cfg(all(debug_assertions, target_arch = "wasm32", not(target_os = "emscripten")))]
     wasm::set_panic_hook();
 
-    let input = unsafe { &*input };
-    let public_recipients = {
-        let recipients = unsafe { input.public.recipients.as_slice() };
-        recipients
-            .iter()
-            .map(|r| PublicRecipient {
-                encrypted_key: r.encrypted_key,
-                ephemeral_public_key: r.ephemeral_public_key,
-            })
-            .collect::<Vec<_>>()
-    };
-    let private_recipients = {
-        let recipients = unsafe { input.private.recipients.as_slice() };
-        recipients
-            .iter()
-            .map(|r| PrivateRecipient {
-                public_key: r.public_key,
-                ephemeral_private_key: r.ephemeral_private_key,
-            })
-            .collect::<Vec<_>>()
-    };
-    let input = Input {
-        public: PublicInput {
-            struct_hash: input.public.struct_hash,
-            nonce: input.public.nonce,
-            ciphertext: unsafe { input.public.ciphertext.as_slice() },
-            iv: input.public.iv,
-            tag: input.public.tag,
-            recipients: &public_recipients,
-        },
-        private: PrivateInput {
-            transaction: unsafe { input.private.transaction.as_slice() },
-            content_encryption_key: input.private.content_encryption_key,
-            recipients: &private_recipients,
-        },
-    };
-
+    let input = unsafe { &*input }.to_input();
     crate::circuit(&input);
 }
 
-#[cfg(all(debug_assertions, target_arch = "wasm32"))]
+#[cfg(all(debug_assertions, target_arch = "wasm32", not(target_os = "emscripten")))]
 mod wasm {
     use std::{
         panic::{self, PanicHookInfo},

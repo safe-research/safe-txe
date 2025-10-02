@@ -1,19 +1,22 @@
-import { type Bytes, byteLength, type Hex, isBytes, setHex } from "./bytes.ts";
+import { type Bytes, isBytes, toBytes } from "./bytes.ts";
 
-type Encode = number | bigint | Bytes | Encode[];
+type Encode = number | bigint | Bytes | Uint8Array | Encode[];
 type Decode = Bytes | Decode[];
 
 function encode(data: Encode): Uint8Array {
 	if (Array.isArray(data)) {
 		return lengthPrefix(0xc0, ...data.map(encode));
-	} else if (isBytes(data)) {
-		if (byteLength(data) === 1 && Number(data) < 0x80) {
-			return Uint8Array.from([Number(data)]);
+	} else if (isByteArray(data)) {
+		// biome-ignore lint/style/noNonNullAssertion: length is checked
+		if (data.length === 1 && data[0]! < 0x80) {
+			return data;
 		} else {
-			return lengthPrefix(0x80, toArray(data));
+			return lengthPrefix(0x80, data);
 		}
+	} else if (isBytes(data)) {
+		return encode(toByteArray(data));
 	} else if (typeof data === "bigint" || typeof data === "number") {
-		return encode(`0x${toHex(data)}`);
+		return encode(toByteArray(data));
 	} else {
 		throw new Error(`invalid RLP field ${data}`);
 	}
@@ -56,7 +59,7 @@ function next(data: Uint8Array): [Decode, Uint8Array] {
 		throw new Error("invalid RLP data: empty input");
 	}
 	if (tag <= 0x7f) {
-		return [`0x${toHexByte(tag)}`, data.slice(1)];
+		return [toBytes(Uint8Array.from([tag])), data.slice(1)];
 	} else if (tag <= 0xbf) {
 		const [payload, rest] = prefixedLength(tag, 0x80, data);
 		return [toBytes(payload), rest];
@@ -96,16 +99,22 @@ function prefixedLength(
 	}
 }
 
-function toArray(bytes: Bytes | Hex): Uint8Array {
-	const hex = bytes.replace(/^0x/, "");
+function toByteArray(value: Bytes | Hex | number | bigint): Uint8Array {
+	const hex =
+		typeof value === "string" ? value.replace(/^0x/, "") : toHex(value);
 	const array = new Uint8Array(hex.length / 2);
 	setHex(array, hex);
 	return array;
 }
 
-function toBytes(array: Uint8Array): Bytes {
-	return `0x${[...array].map(toHexByte).join("")}`;
+function isByteArray(value: unknown): value is Uint8Array {
+	return (
+		value instanceof Uint8Array ||
+		Object.prototype.toString.call(value) === "[object Uint8Array]"
+	);
 }
+
+type Hex = string;
 
 function toHex(value: number | bigint): Hex {
 	if (value === 0 || value === 0n) {
@@ -115,8 +124,11 @@ function toHex(value: number | bigint): Hex {
 	return hex.length % 2 === 0 ? hex : `0${hex}`;
 }
 
-function toHexByte(byte: number): Hex {
-	return byte.toString(16).padStart(2, "0");
+function setHex(array: Uint8Array, hex: Hex) {
+	for (let i = 0; i < hex.length / 2; i++) {
+		const j = i * 2;
+		array[i] = parseInt(hex.slice(j, j + 2), 16);
+	}
 }
 
 export { encode, decode };

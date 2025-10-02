@@ -3,7 +3,6 @@
 use crate::rlp;
 use sha3::{Digest as _, Keccak256};
 
-#[derive(Default)]
 pub struct SafeTransaction<'a> {
     to: [u8; 20],
     value: [u8; 32],
@@ -19,25 +18,19 @@ pub struct SafeTransaction<'a> {
 impl<'a> SafeTransaction<'a> {
     /// RLP-decodes a Safe transaction with the given `nonce`.
     pub fn decode(encoded: &'a [u8]) -> Result<Self, rlp::Error> {
-        let mut result = SafeTransaction::default();
-
-        let mut decoder = rlp::Decoder::new(encoded);
-        {
-            let mut list = decoder.list()?;
-            result.to = list.address()?;
-            result.value = list.uint()?;
-            result.data = list.bytes()?;
-            result.operation = list.bool()?.into();
-            result.safe_tx_gas = list.uint()?;
-            result.gas_gas = list.uint()?;
-            result.gas_price = list.uint()?;
-            result.gas_token = list.address()?;
-            result.refund_reciver = list.address()?;
-            list.done()?;
-        }
-        decoder.done()?;
-
-        Ok(result)
+        rlp::Decoder::new(encoded).decode_struct(|decoder| {
+            Ok(SafeTransaction {
+                to: decoder.address()?,
+                value: decoder.uint()?,
+                data: decoder.bytes()?,
+                operation: decoder.bool()?.into(),
+                safe_tx_gas: decoder.uint()?,
+                gas_gas: decoder.uint()?,
+                gas_price: decoder.uint()?,
+                gas_token: decoder.address()?,
+                refund_reciver: decoder.address()?,
+            })
+        })
     }
 
     /// Returns the Safe transaction ERC-712 struct hash.
@@ -61,9 +54,7 @@ impl<'a> SafeTransaction<'a> {
     }
 }
 
-#[derive(Default)]
 pub enum Operation {
-    #[default]
     Call,
     Delegatecall,
 }

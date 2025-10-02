@@ -21,7 +21,7 @@ type SafeTransaction = {
 
 type SafeTransactionParameters = Omit<SafeTransaction, "nonce">;
 
-function rlpEncode(transaction: SafeTransactionParameters): Uint8Array {
+function encode(transaction: SafeTransactionParameters): Uint8Array {
 	return rlp.encode([
 		transaction.to,
 		transaction.value,
@@ -35,7 +35,7 @@ function rlpEncode(transaction: SafeTransactionParameters): Uint8Array {
 	]);
 }
 
-function rlpDecode(encoded: Uint8Array): SafeTransactionParameters {
+function decode(encoded: Uint8Array): SafeTransactionParameters {
 	const fields = rlp.decode(encoded);
 	if (!Array.isArray(fields) || fields.length !== 9) {
 		throw new Error("invalid RLP-encoded Safe transaction");
@@ -83,4 +83,4 @@ function rlpDecode(encoded: Uint8Array): SafeTransactionParameters {
 }
 
 export type { Operation, SafeTransaction, SafeTransactionParameters };
-export { rlpEncode, rlpDecode };
+export { encode, decode };

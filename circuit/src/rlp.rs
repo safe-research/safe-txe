@@ -17,12 +17,52 @@ impl<'a> Decoder<'a> {
         Self(data)
     }
 
+    /// Decodes a struct from an RLP-encoded list.
+    pub fn decode_struct<T, F>(&mut self, mut f: F) -> Result<T, Error>
+    where
+        T: 'a,
+        F: FnMut(&mut Decoder<'a>) -> Result<T, Error> + 'a,
+    {
+        let mut list = self.list()?;
+        self.done()?;
+        let result = f(&mut list)?;
+        list.done()?;
+        Ok(result)
+    }
+
     /// Decodes a list item.
     pub fn list(&mut self) -> Result<Self, Error> {
         match self.next()? {
             Some(Item::List(list)) => Ok(list),
             _ => Err(Error),
         }
+    }
+
+    /// Decodes a vector.
+    pub fn vec<T, F>(&mut self, mut f: F) -> Result<Vec<T>, Error>
+    where
+        T: 'a,
+        F: FnMut(&mut Decoder<'a>) -> Result<T, Error> + 'a,
+    {
+        let mut list = self.list()?;
+        let count = {
+            let mut list = Decoder(list.0);
+            let mut count = 0;
+            while list.next()?.is_some() {
+                count += 1;
+            }
+            count
+        };
+        let mut result = Vec::with_capacity(count);
+        let mut cursor = list.0;
+        while list.next()?.is_some() {
+            let size = cursor.len().wrapping_sub(list.0.len());
+            let (item, rest) = unsafe { cursor.split_at_unchecked(size) };
+            let item = f(&mut Decoder(item))?;
+            cursor = rest;
+            result.push(item);
+        }
+        Ok(result)
     }
 
     /// Decodes a bytes item.
@@ -33,9 +73,14 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// Decodes a bytes array item.
+    pub fn bytes_array<const N: usize>(&mut self) -> Result<[u8; N], Error> {
+        self.bytes()?.try_into().map_err(|_| Error)
+    }
+
     /// Decodes an address item
     pub fn address(&mut self) -> Result<[u8; 20], Error> {
-        self.bytes()?.try_into().map_err(|_| Error)
+        self.bytes_array()
     }
 
     /// Decodes an uint item

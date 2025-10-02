@@ -6,11 +6,8 @@ import {
 } from "jose";
 import type { PrivateInput } from "./circuit.ts";
 import { unprotectedOptions } from "./internal/jose-private.js";
-import {
-	rlpDecode,
-	rlpEncode,
-	type SafeTransactionParameters,
-} from "./safe.ts";
+import type { SafeTransactionParameters } from "./safe.ts";
+import * as safe from "./safe.ts";
 import { decode, encode, type TXE } from "./txe.ts";
 
 type Encrypt = {
@@ -48,7 +45,7 @@ async function encrypt({
 	if (recipients.length === 0) {
 		throw new Error("must encrypt to at least one recipient");
 	}
-	const encoded = rlpEncode(transaction);
+	const encoded = safe.encode(transaction);
 	const cek = await contentEncryptionKey();
 
 	const epks = await Promise.all(recipients.map(() => ephemeralPrivateKey()));
@@ -90,7 +87,7 @@ async function decrypt({
 	const txe = decode(blob);
 	const jwe = fromTXE(txe);
 	const { plaintext } = await generalDecrypt(jwe, privateKey);
-	return rlpDecode(plaintext);
+	return safe.decode(plaintext);
 }
 
 type InternalJWE = {
