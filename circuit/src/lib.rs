@@ -2,14 +2,11 @@ pub mod capi;
 mod ecdh;
 mod encrypt;
 mod hex;
-mod macros;
 mod rlp;
 mod safe;
+mod shims;
 
-use crate::{
-    macros::{unwrap, verify},
-    safe::SafeTransaction,
-};
+use crate::{safe::SafeTransaction, shims::BoolExt as _};
 use std::{borrow::Cow, iter};
 
 /// The input to the circuit.
@@ -66,51 +63,64 @@ pub struct PrivateRecipient {
     pub ephemeral_private_key: [u8; 32],
 }
 
+/// An error executing the circuit.
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub enum Error {
+    /// Invalid Safe transaction encoding.
+    InvalidTransaction,
+    /// Struct hash mismatch.
+    StructHashMismatch,
+    /// Error performing transaction encryption.
+    ContentEncriptionFailure,
+    /// Ciphertext mismatch.
+    CiphertextMismatch,
+    /// Tag mismatch.
+    TagMismatch,
+    /// Recipient count mismatch.
+    RecipientCountMismatch,
+    /// Ephemeral key mismatch.
+    EphemeralKeyMismatch,
+    /// Error encrypting content key.
+    KeyEncriptionFailure,
+    /// Encrypted key mismatch.
+    EncryptedKeyMismatch,
+}
+
 /// The private input to the verifier program.
-pub fn circuit(input: &Input) {
+pub fn circuit(input: &Input) -> Result<(), Error> {
     // Verify the transaction matches the struct hash.
-    let transaction = unwrap!(SafeTransaction::decode(&input.private.transaction));
-    verify!(
-        transaction.struct_hash(input.public.nonce) == input.public.struct_hash,
-        "struct hash mismatch"
-    );
+    let transaction = SafeTransaction::decode(&input.private.transaction)
+        .map_err(|_| Error::InvalidTransaction)?;
+    (transaction.struct_hash(input.public.nonce) == input.public.struct_hash)
+        .xok_or(Error::StructHashMismatch)?;
 
     // Verify the content encryption integrity.
-    let (ciphertext, tag) = unwrap!(encrypt::content(
+    let (ciphertext, tag) = encrypt::content(
         &input.private.transaction,
         input.private.content_encryption_key,
-        input.public.iv
-    ));
-    verify!(
-        *ciphertext == *input.public.ciphertext,
-        "ciphertext mismatch"
-    );
-    verify!(tag == input.public.tag, "tag mismatch");
+        input.public.iv,
+    )
+    .map_err(|_| Error::ContentEncriptionFailure)?;
+    (*ciphertext == *input.public.ciphertext).xok_or(Error::CiphertextMismatch)?;
+    (tag == input.public.tag).xok_or(Error::TagMismatch)?;
 
     // Verify the key wrapping integrity.
-    verify!(
-        input.public.recipients.len() == input.private.recipients.len(),
-        "recipient mismatch"
-    );
+    (input.public.recipients.len() == input.private.recipients.len())
+        .xok_or(Error::RecipientCountMismatch)?;
     for (public, private) in iter::zip(&*input.public.recipients, &*input.private.recipients) {
         // Verify the ephemeral key integrity.
         let ephemeral_public_key = ecdh::public_key(private.ephemeral_private_key);
-        verify!(
-            ephemeral_public_key == public.ephemeral_public_key,
-            "ephemeral key mismatch"
-        );
+        (ephemeral_public_key == public.ephemeral_public_key)
+            .xok_or(Error::EphemeralKeyMismatch)?;
 
         // Verify the content key encryption.
         let shared_secret = ecdh::shared_secret(private.ephemeral_private_key, private.public_key);
-        let encrypted_key = unwrap!(encrypt::key(
-            input.private.content_encryption_key,
-            shared_secret,
-        ));
-        verify!(
-            encrypted_key == public.encrypted_key,
-            "encrypted key mismatch"
-        );
+        let encrypted_key = encrypt::key(input.private.content_encryption_key, shared_secret)
+            .map_err(|_| Error::KeyEncriptionFailure)?;
+        (encrypted_key == public.encrypted_key).xok_or(Error::EncryptedKeyMismatch)?;
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -199,6 +209,6 @@ mod tests {
                 ]),
             },
         };
-        circuit(&input);
+        assert!(circuit(&input).is_ok());
     }
 }

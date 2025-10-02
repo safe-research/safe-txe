@@ -49,27 +49,31 @@ function extract({ nonce, structHash, blob }: Extract): Input {
 	}
 
 	const txe = decode(blob);
-	const input: Input = {
+	return conceal({
 		public: {
 			structHash,
 			nonce,
 			...txe,
 		},
+	});
+}
+
+function conceal(input: Pick<Input, "public">): Input {
+	return {
+		...input,
 		// Verifying a proof with Ligero requires the private input sizes to match
 		// the inputs used when proving, while their values do not actually matter.
 		// Use empty (but correctly sized) private input values. The actual private
 		// inputs will be generated when encrypting.
 		private: {
-			transaction: new Uint8Array(txe.ciphertext.length),
+			transaction: new Uint8Array(input.public.ciphertext.length),
 			contentEncryptionKey: new Uint8Array(16),
-			recipients: txe.recipients.map(() => ({
+			recipients: input.public.recipients.map(() => ({
 				publicKey: new Uint8Array(32),
 				ephemeralPrivateKey: new Uint8Array(32),
 			})),
 		},
 	};
-
-	return input;
 }
 
 function argify(input: Input): InputArguments {
@@ -101,4 +105,4 @@ function argify(input: Input): InputArguments {
 }
 
 export type { Input, PublicInput, PrivateInput, InputArguments };
-export { extract, argify };
+export { extract, conceal, argify };

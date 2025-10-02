@@ -11,7 +11,6 @@ import {
 	type Input,
 } from "../src/index.ts";
 
-const { TXE_LOG } = process.env;
 const circuit = await fs
 	.readFile("./target/wasm32-unknown-unknown/release/safe_txe_circuit.wasm")
 	.catch(() => null)
@@ -32,9 +31,6 @@ const circuit = await fs
 			const instance = await WebAssembly.instantiate(module, {
 				env: {
 					log: (ptr: number, len: number) => {
-						if (!TXE_LOG) {
-							return;
-						}
 						const { memory } = instance.exports as {
 							memory: WebAssembly.Memory;
 						};

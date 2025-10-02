@@ -1,9 +1,16 @@
 //! External C interface for the circuit.
 
-use crate::{
-    Input, PrivateInput, PrivateRecipient, PublicInput, PublicRecipient, hex, macros::unwrap, rlp,
-};
+use crate::{Input, PrivateInput, PrivateRecipient, PublicInput, PublicRecipient, hex, rlp};
 use std::ffi::{CStr, c_char};
+
+/// Circuit execution result.
+#[repr(C)]
+pub enum CircuitResult {
+    /// The circuit executed successfully.
+    Success = 0,
+    /// The circuit failed to execute.
+    Failure = -1,
+}
 
 /// Executes the Safe transaction circuit.
 ///
@@ -12,57 +19,70 @@ use std::ffi::{CStr, c_char};
 /// The caller must ensure that `public` and `private` are valid pointers to
 /// null-terminated C strings.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
-pub unsafe extern "C" fn txe_circuit(public: *const c_char, private: *const c_char) {
-    let public = hex_arg(public);
-    let private = hex_arg(private);
-    let input = Input {
-        public: unwrap!(rlp::Decoder::new(&public).decode_struct(|decoder| {
-            Ok(PublicInput {
-                struct_hash: decoder.bytes_array()?,
-                nonce: decoder.uint()?,
-                ciphertext: decoder.bytes()?.into(),
-                iv: decoder.bytes_array()?,
-                tag: decoder.bytes_array()?,
-                recipients: decoder
-                    .vec(|item| {
-                        item.decode_struct(|decoder| {
-                            Ok(PublicRecipient {
-                                encrypted_key: decoder.bytes_array()?,
-                                ephemeral_public_key: decoder.bytes_array()?,
-                            })
+pub unsafe extern "C" fn txe_circuit(
+    public: *const c_char,
+    private: *const c_char,
+) -> CircuitResult {
+    let Some(public) = arg(public, |decoder| {
+        Ok(PublicInput {
+            struct_hash: decoder.bytes_array()?,
+            nonce: decoder.uint()?,
+            ciphertext: decoder.bytes()?.to_vec().into(),
+            iv: decoder.bytes_array()?,
+            tag: decoder.bytes_array()?,
+            recipients: decoder
+                .vec(|item| {
+                    item.decode_struct(|decoder| {
+                        Ok(PublicRecipient {
+                            encrypted_key: decoder.bytes_array()?,
+                            ephemeral_public_key: decoder.bytes_array()?,
                         })
-                    })?
-                    .into(),
-            })
-        })),
-        private: unwrap!(rlp::Decoder::new(&private).decode_struct(|decoder| {
-            Ok(PrivateInput {
-                transaction: decoder.bytes()?.into(),
-                content_encryption_key: decoder.bytes_array()?,
-                recipients: decoder
-                    .vec(|item| {
-                        item.decode_struct(|decoder| {
-                            Ok(PrivateRecipient {
-                                public_key: decoder.bytes_array()?,
-                                ephemeral_private_key: decoder.bytes_array()?,
-                            })
-                        })
-                    })?
-                    .into(),
-            })
-        })),
+                    })
+                })?
+                .into(),
+        })
+    }) else {
+        return CircuitResult::Failure;
     };
-    crate::circuit(&input);
+
+    let Some(private) = arg(private, |decoder| {
+        Ok(PrivateInput {
+            transaction: decoder.bytes()?.to_vec().into(),
+            content_encryption_key: decoder.bytes_array()?,
+            recipients: decoder
+                .vec(|item| {
+                    item.decode_struct(|decoder| {
+                        Ok(PrivateRecipient {
+                            public_key: decoder.bytes_array()?,
+                            ephemeral_private_key: decoder.bytes_array()?,
+                        })
+                    })
+                })?
+                .into(),
+        })
+    }) else {
+        return CircuitResult::Failure;
+    };
+
+    let input = Input { public, private };
+    match crate::circuit(&input) {
+        Ok(()) => CircuitResult::Success,
+        Err(_) => CircuitResult::Failure,
+    }
 }
 
-fn hex_arg(s: *const c_char) -> Vec<u8> {
-    let s = unwrap!(unsafe { CStr::from_ptr(s) }.to_str());
-    unwrap!(hex::decode(s))
+fn arg<T, F>(s: *const c_char, f: F) -> Option<T>
+where
+    F: FnOnce(&mut rlp::Decoder) -> Result<T, rlp::Error>,
+{
+    let s = unsafe { CStr::from_ptr(s) }.to_str().ok()?;
+    let hex = hex::decode(s).ok()?;
+    let mut decoder = rlp::Decoder::new(&hex);
+    decoder.decode_struct(f).ok()
 }
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
-    use crate::macros::verify;
     use std::{
         ffi::c_char,
         mem::MaybeUninit,
@@ -83,32 +103,42 @@ mod wasm {
     }
 
     #[unsafe(export_name = "_start")]
-    pub unsafe extern "C" fn start() {
+    pub unsafe extern "C" fn start() -> ! {
         panic::set_hook(Box::new(panic_hook));
 
         let (argc, argb_size) = unsafe {
             let mut argc = MaybeUninit::uninit();
             let mut argb_size = MaybeUninit::uninit();
             let result = args_sizes_get(argc.as_mut_ptr(), argb_size.as_mut_ptr());
-            verify!(result == 0, "failed to get args sizes");
+            if result != 0 {
+                exit(1);
+            };
             (argc.assume_init(), argb_size.assume_init())
         };
-        verify!(argc == 3, "invalid number of arguments");
+        if argc != 3 {
+            exit(1);
+        }
 
         let mut argb = Box::<[c_char]>::new_uninit_slice(argb_size);
-        {
+        let result = {
             let argv = unsafe {
                 let mut argv = MaybeUninit::<[*mut c_char; 3]>::uninit();
                 let result = args_get(argv.as_mut_ptr().cast(), argb.as_mut_ptr().cast());
-                verify!(result == 0, "failed to get args");
+                if result != 0 {
+                    exit(1);
+                }
                 argv.assume_init()
             };
 
             let [_, public, private] = argv;
-            unsafe { super::txe_circuit(public, private) };
-        }
+            unsafe { super::txe_circuit(public, private) }
+        };
 
-        exit(0);
+        exit(result as _);
+    }
+
+    fn exit(code: i32) -> ! {
+        unsafe { proc_exit(code) }
     }
 
     fn panic_hook(info: &PanicHookInfo) {
@@ -119,11 +149,9 @@ mod wasm {
                 log(message.as_ptr(), message.len());
             }
         }
+        #[cfg(not(debug_assertions))]
+        let _ = info;
         exit(1);
-    }
-
-    fn exit(code: i32) -> ! {
-        unsafe { proc_exit(code) }
     }
 }
 

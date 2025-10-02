@@ -1,6 +1,7 @@
 export type { Address, Bytes } from "./bytes.ts";
 export {
 	argify,
+	conceal,
 	extract,
 	type Input,
 	type InputArguments,

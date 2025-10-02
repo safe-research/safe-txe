@@ -18,10 +18,10 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes a struct from an RLP-encoded list.
-    pub fn decode_struct<T, F>(&mut self, mut f: F) -> Result<T, Error>
+    pub fn decode_struct<T, F>(&mut self, f: F) -> Result<T, Error>
     where
         T: 'a,
-        F: FnMut(&mut Decoder<'a>) -> Result<T, Error> + 'a,
+        F: FnOnce(&mut Decoder<'a>) -> Result<T, Error> + 'a,
     {
         let mut list = self.list()?;
         self.done()?;
