@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import { describe, it } from "node:test";
+import { WASI } from "node:wasi";
 import { ethers } from "ethers";
 import {
 	argify,
@@ -12,94 +13,46 @@ import {
 
 const { TXE_LOG } = process.env;
 const circuit = await fs
-	.readFile("./target/wasm32-unknown-unknown/debug/safe_txe_circuit.wasm")
+	.readFile("./target/wasm32-unknown-unknown/release/safe_txe_circuit.wasm")
 	.catch(() => null)
 	.then(async (wasm) => {
 		if (!wasm) {
 			return null;
 		}
 
-		const bytes = wasm as BufferSource;
+		const module = await WebAssembly.compile(wasm as BufferSource);
 		const decoder = new TextDecoder();
-		const argv: string[] = [];
-		const { instance } = await WebAssembly.instantiate(bytes, {
-			env: {
-				log: (ptr: number, len: number) => {
-					console.log(argv);
-					if (!TXE_LOG) {
-						return;
-					}
-					const { memory } = instance.exports as { memory: WebAssembly.Memory };
-					const buffer = new Uint8Array(memory.buffer.slice(ptr, ptr + len));
-					const message = decoder.decode(buffer);
-					console.log(message);
-				},
-			},
-		});
-		const { memory, txe_input_new, txe_input_free, txe_circuit } =
-			instance.exports as {
-				memory: WebAssembly.Memory;
-				txe_input_new: (
-					transactionLength: number,
-					recipientsLength: number,
-				) => number;
-				txe_input_free: (input: number) => void;
-				txe_circuit: (input: number) => number;
-			};
-		const getMemoryCursor = (ptr: number, len?: number) => {
-			const buffer = new Uint8Array(memory.buffer, ptr, len);
-			const view = new DataView(memory.buffer, ptr, len);
 
-			let pos = 0;
-			return {
-				write: (data: Uint8Array) => {
-					buffer.set(data, pos);
-					pos += data.length;
-				},
-				skip: (size: number) => {
-					pos += size;
-				},
-				slice: (itemSize: number = 1) => {
-					const ptr = view.getUint32(pos, true);
-					const len = view.getUint32(pos + 4, true) * itemSize;
-					pos += 8;
-					return getMemoryCursor(ptr, len);
-				},
-			};
-		};
 		return async (input: Input) => {
 			const args = argify(input);
-			argv.splice(0, argv.length, args.public, args.private);
-			const ptr = txe_input_new(
-				input.public.ciphertext.length,
-				input.public.recipients.length,
-			);
-			try {
-				const cursor = getMemoryCursor(ptr);
-				cursor.write(ethers.getBytes(input.public.structHash));
-				cursor.write(ethers.getBytes(ethers.toBeHex(input.public.nonce, 32)));
-				cursor.slice().write(input.public.ciphertext);
-				cursor.write(input.public.iv);
-				cursor.write(input.public.tag);
-				let recipients = cursor.slice(56);
-				for (const recipient of input.public.recipients) {
-					recipients.write(recipient.encryptedKey);
-					recipients.write(recipient.ephemeralPublicKey);
-				}
-				cursor.slice().write(input.private.transaction);
-				cursor.write(input.private.contentEncryptionKey);
-				recipients = cursor.slice(64);
-				for (const recipient of input.private.recipients) {
-					recipients.write(recipient.publicKey);
-					recipients.write(recipient.ephemeralPrivateKey);
-				}
-				txe_circuit(ptr);
-				return true;
-			} catch {
-				return false;
-			} finally {
-				txe_input_free(ptr);
-			}
+			const wasi = new WASI({
+				version: "preview1",
+				args: ["safe_txe_circuit", args.public, args.private],
+			});
+			const instance = await WebAssembly.instantiate(module, {
+				env: {
+					log: (ptr: number, len: number) => {
+						if (!TXE_LOG) {
+							return;
+						}
+						const { memory } = instance.exports as {
+							memory: WebAssembly.Memory;
+						};
+						const buffer = new Uint8Array(memory.buffer.slice(ptr, ptr + len));
+						const message = decoder.decode(buffer);
+						console.log(message);
+					},
+				},
+				wasi_snapshot_preview1: {
+					// biome-ignore-start lint/complexity/useLiteralKeys: index signature type
+					args_get: wasi.wasiImport["args_get"],
+					args_sizes_get: wasi.wasiImport["args_sizes_get"],
+					proc_exit: wasi.wasiImport["proc_exit"],
+					// biome-ignore-end lint/complexity/useLiteralKeys: index signature type
+				},
+			});
+			const code = wasi.start(instance);
+			return code === 0;
 		};
 	});
 
