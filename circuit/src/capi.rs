@@ -159,14 +159,14 @@ pub unsafe extern "C" fn txe_input_free(input: *mut CInput) {
 /// The caller must ensure that `input` is a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn txe_circuit(input: *const CInput) {
-    #[cfg(all(debug_assertions, target_arch = "wasm32", not(target_os = "emscripten")))]
+    #[cfg(all(debug_assertions, target_arch = "wasm32"))]
     wasm::set_panic_hook();
 
     let input = unsafe { &*input }.to_input();
     crate::circuit(&input);
 }
 
-#[cfg(all(debug_assertions, target_arch = "wasm32", not(target_os = "emscripten")))]
+#[cfg(all(debug_assertions, target_arch = "wasm32"))]
 mod wasm {
     use std::{
         panic::{self, PanicHookInfo},
