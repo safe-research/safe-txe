@@ -120,4 +120,4 @@ Verify time: 420410ms    (min: 420410, max: 420410, count: 1)
 
 ## Results
 
-**On my machine** (AMD 7840U with 32GB of RAM), the proving took around 14m34s to generated a 480MB proof, and took 7m00s to verify the proof. In its current state, this is not really feasible. Note, however, that the circuit we (very naively) created has hundreds of millions of constraints, and given more work and time, we can probably optimize the circuit in order to improve performance.
+**On my machine** (AMD 7840U with 32GB of RAM), the proving took around 18m05s to generated a 480MB proof, and took 7m00s to verify the proof. In its current state, this is not really feasible. Note, however, that the circuit we (very naively) created has hundreds of millions of constraints, and given more work and time, we can probably optimize the circuit in order to improve performance.
